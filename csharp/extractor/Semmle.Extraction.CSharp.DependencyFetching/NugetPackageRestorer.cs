@@ -20,7 +20,6 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
     {
         internal const string PublicNugetOrgFeed = "https://api.nuget.org/v3/index.json";
 
-        private readonly bool checkNugetFeedResponsiveness = EnvironmentVariables.GetBooleanOptOut(EnvironmentVariableNames.CheckNugetFeedResponsiveness);
         private readonly FileProvider fileProvider;
         private readonly FileContent fileContent;
         private readonly IDotNet dotnet;
@@ -30,6 +29,8 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
         private readonly DependencyDirectory missingPackageDirectory;
         private readonly ILogger logger;
         private readonly ICompilationInfoContainer compilationInfoContainer;
+        private readonly Lazy<bool> lazyCheckNugetFeedResponsiveness = new(() => EnvironmentVariables.GetBooleanOptOut(EnvironmentVariableNames.CheckNugetFeedResponsiveness));
+        private bool CheckNugetFeedResponsiveness => lazyCheckNugetFeedResponsiveness.Value;
         private HashSet<string> PrivateRegistryFeeds => dependabotProxy?.RegistryURLs ?? [];
         private bool HasPrivateRegistryFeeds => PrivateRegistryFeeds.Any();
 
@@ -113,15 +114,14 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
         public HashSet<AssemblyLookupLocation> Restore()
         {
             var assemblyLookupLocations = new HashSet<AssemblyLookupLocation>();
-            logger.LogInfo($"Checking NuGet feed responsiveness: {checkNugetFeedResponsiveness}");
-            compilationInfoContainer.CompilationInfos.Add(("NuGet feed responsiveness checked", checkNugetFeedResponsiveness ? "1" : "0"));
+            logger.LogInfo($"Checking NuGet feed responsiveness: {CheckNugetFeedResponsiveness}");
+            compilationInfoContainer.CompilationInfos.Add(("NuGet feed responsiveness checked", CheckNugetFeedResponsiveness ? "1" : "0"));
 
             HashSet<string> explicitFeeds = [];
             string? explicitRestoreSources = null;
 
             try
             {
-                HashSet<string> reachableFeeds = [];
                 HashSet<string> allFeeds = [];
 
                 // Find feeds that are configured in NuGet.config files and divide them into ones that
@@ -129,7 +129,7 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
                 // (including inherited ones) from other locations on the host outside of the working directory.
                 (explicitFeeds, allFeeds) = GetAllFeeds();
 
-                if (checkNugetFeedResponsiveness)
+                if (CheckNugetFeedResponsiveness)
                 {
                     var inheritedFeeds = allFeeds.Except(explicitFeeds).ToHashSet();
 
@@ -138,11 +138,7 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
                         compilationInfoContainer.CompilationInfos.Add(("Inherited NuGet feed count", inheritedFeeds.Count.ToString()));
                     }
 
-                    var explicitFeedsReachable = CheckSpecifiedFeeds(explicitFeeds, out var reachableExplicitFeeds);
-                    reachableFeeds.UnionWith(reachableExplicitFeeds);
-                    reachableFeeds.UnionWith(GetReachableNuGetFeeds(inheritedFeeds, isFallback: false));
-
-                    if (!explicitFeedsReachable)
+                    if (!CheckSpecifiedFeeds(explicitFeeds, out var reachableFeeds))
                     {
                         // todo: we could also check the reachability of the inherited nuget feeds, but to use those in the fallback we would need to handle authentication too.
                         var unresponsiveMissingPackageLocation = DownloadMissingPackagesFromSpecificFeeds([], explicitFeeds);
@@ -150,6 +146,8 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
                             ? []
                             : [unresponsiveMissingPackageLocation];
                     }
+
+                    reachableFeeds.UnionWith(GetReachableNuGetFeeds(inheritedFeeds, isFallback: false));
 
                     // If feed responsiveness is being checked, we only want to use the feeds that are reachable (note this set includes private
                     // registry feeds if they are reachable).
@@ -216,7 +214,7 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
 
             var usedPackageNames = GetAllUsedPackageDirNames(dependencies);
 
-            var missingPackageLocation = checkNugetFeedResponsiveness
+            var missingPackageLocation = CheckNugetFeedResponsiveness
                 ? DownloadMissingPackagesFromSpecificFeeds(usedPackageNames, explicitFeeds)
                 : DownloadMissingPackages(usedPackageNames);
 
@@ -233,7 +231,7 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
         /// <param name="feedsToCheck">The feeds to check.</param>
         /// <param name="isFallback">Whether the feeds are fallback feeds or not.</param>
         /// <returns>The list of feeds that could be reached.</returns>
-        private List<string> GetReachableNuGetFeeds(HashSet<string> feedsToCheck, bool isFallback)
+        private HashSet<string> GetReachableNuGetFeeds(HashSet<string> feedsToCheck, bool isFallback)
         {
             var fallbackStr = isFallback ? "fallback " : "";
             logger.LogInfo($"Checking {fallbackStr}NuGet feed reachability on feeds: {string.Join(", ", feedsToCheck.OrderBy(f => f))}");
@@ -241,7 +239,7 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
             var (initialTimeout, tryCount) = GetFeedRequestSettings(isFallback);
             var reachableFeeds = feedsToCheck
                 .Where(feed => IsFeedReachable(feed, initialTimeout, tryCount, allowExceptions: false))
-                .ToList();
+                .ToHashSet();
 
             if (reachableFeeds.Count == 0)
             {
@@ -255,7 +253,7 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
             return reachableFeeds;
         }
 
-        private List<string> GetReachableFallbackNugetFeeds(HashSet<string>? feedsFromNugetConfigs)
+        private HashSet<string> GetReachableFallbackNugetFeeds(HashSet<string>? feedsFromNugetConfigs)
         {
             var fallbackFeeds = EnvironmentVariables.GetURLs(EnvironmentVariableNames.FallbackNugetFeeds).ToHashSet();
             if (fallbackFeeds.Count == 0)
@@ -778,18 +776,35 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
         /// <param name="feeds">The set of package feeds to check.</param>
         /// <returns>
         /// True if all feeds are reachable or false otherwise.
-        /// Also returns the list of reachable feeds as an out parameter.
+        /// Also returns the set of reachable feeds as an out parameter.
         /// </returns>
-        private bool CheckSpecifiedFeeds(HashSet<string> feeds, out List<string> reachableFeeds)
+        private bool CheckSpecifiedFeeds(HashSet<string> feeds, out HashSet<string> reachableFeeds)
         {
-            // Exclude any feeds that are configured by the corresponding environment variable.
+            // Exclude any feeds from the feed check that are configured by the corresponding environment variable.
+            // These feeds are always assumed to be reachable.
             var excludedFeeds = GetExcludedFeeds();
 
-            var feedsToCheck = feeds.Where(feed => !excludedFeeds.Contains(feed)).ToHashSet();
+            HashSet<string> feedsToCheck = [];
+            HashSet<string> feedsNotToCheck = [];
+            foreach (var feed in feeds)
+            {
+                if (excludedFeeds.Contains(feed))
+                {
+                    logger.LogInfo($"Not checking reachability of NuGet feed '{feed}' as it is in the list of excluded feeds.");
+                    feedsNotToCheck.Add(feed);
+                }
+                else
+                {
+                    feedsToCheck.Add(feed);
+                }
+            }
+
             reachableFeeds = GetReachableNuGetFeeds(feedsToCheck, isFallback: false);
             var allFeedsReachable = reachableFeeds.Count == feedsToCheck.Count;
 
             EmitUnreachableFeedsDiagnostics(allFeedsReachable);
+
+            reachableFeeds.UnionWith(feedsNotToCheck);
 
             return allFeedsReachable;
         }
