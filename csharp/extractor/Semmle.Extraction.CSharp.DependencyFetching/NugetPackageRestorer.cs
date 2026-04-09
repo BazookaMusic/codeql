@@ -122,12 +122,10 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
 
             try
             {
-                HashSet<string> allFeeds = [];
-
                 // Find feeds that are configured in NuGet.config files and divide them into ones that
                 // are explicitly configured for the project or by a private registry, and "all feeds"
                 // (including inherited ones) from other locations on the host outside of the working directory.
-                (explicitFeeds, allFeeds) = GetAllFeeds();
+                (explicitFeeds, var allFeeds) = GetAllFeeds();
 
                 if (CheckNugetFeedResponsiveness)
                 {
