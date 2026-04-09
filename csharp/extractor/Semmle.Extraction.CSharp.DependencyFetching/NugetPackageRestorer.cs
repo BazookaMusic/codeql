@@ -274,7 +274,11 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
                 }
             }
 
-            return GetReachableNuGetFeeds(fallbackFeeds, isFallback: true);
+            var reachableFallbackFeeds = GetReachableNuGetFeeds(fallbackFeeds, isFallback: true);
+
+            compilationInfoContainer.CompilationInfos.Add(("Reachable fallback NuGet feed count", reachableFallbackFeeds.Count.ToString()));
+
+            return reachableFallbackFeeds;
         }
 
         /// <summary>
