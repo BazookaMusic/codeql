@@ -20,6 +20,7 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
     {
         internal const string PublicNugetOrgFeed = "https://api.nuget.org/v3/index.json";
 
+        private readonly bool checkNugetFeedResponsiveness = EnvironmentVariables.GetBooleanOptOut(EnvironmentVariableNames.CheckNugetFeedResponsiveness);
         private readonly FileProvider fileProvider;
         private readonly FileContent fileContent;
         private readonly IDotNet dotnet;
@@ -110,7 +111,6 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
         public HashSet<AssemblyLookupLocation> Restore()
         {
             var assemblyLookupLocations = new HashSet<AssemblyLookupLocation>();
-            var checkNugetFeedResponsiveness = EnvironmentVariables.GetBooleanOptOut(EnvironmentVariableNames.CheckNugetFeedResponsiveness);
             logger.LogInfo($"Checking NuGet feed responsiveness: {checkNugetFeedResponsiveness}");
             compilationInfoContainer.CompilationInfos.Add(("NuGet feed responsiveness checked", checkNugetFeedResponsiveness ? "1" : "0"));
 
@@ -130,13 +130,12 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
 
                     // If private package registries are configured for C#, then consider those
                     // in addition to the ones that are configured in `nuget.config` files.
-                    this.dependabotProxy?.RegistryURLs.ForEach(url => explicitFeeds.Add(url));
+                    dependabotProxy?.RegistryURLs.ForEach(url => explicitFeeds.Add(url));
 
-                    var (explicitFeedsReachable, reachableExplicitFeeds) =
-                        this.CheckSpecifiedFeeds(explicitFeeds);
+                    var (explicitFeedsReachable, reachableExplicitFeeds) = CheckSpecifiedFeeds(explicitFeeds);
                     reachableFeeds.UnionWith(reachableExplicitFeeds);
 
-                    reachableFeeds.UnionWith(this.GetReachableNuGetFeeds(inheritedFeeds, isFallback: false));
+                    reachableFeeds.UnionWith(GetReachableNuGetFeeds(inheritedFeeds, isFallback: false));
 
                     if (inheritedFeeds.Count > 0)
                     {
@@ -193,6 +192,7 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
             }
 
             // Restore project dependencies with `dotnet restore`.
+            // TODO: We also need to respect reachable feeds for resolution restore.
             var restoredProjects = RestoreSolutions(out var container);
             var projects = fileProvider.Projects.Except(restoredProjects);
             RestoreProjects(projects, reachableFeeds, out var containers);
@@ -320,14 +320,14 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
             // `nuget.config` files instead of the command-line arguments.
             string? extraArgs = null;
 
-            if (this.dependabotProxy is not null)
+            if (dependabotProxy is not null)
             {
                 // If the Dependabot proxy is configured, then our main goal is to make `dotnet` aware
                 // of the private registry feeds. However, since providing them as command-line arguments
                 // to `dotnet` ignores other feeds that may be configured, we also need to add the feeds
                 // we have discovered from analysing `nuget.config` files.
                 var sources = configuredSources ?? new();
-                this.dependabotProxy.RegistryURLs.ForEach(url => sources.Add(url));
+                dependabotProxy.RegistryURLs.ForEach(url => sources.Add(url));
 
                 // Add package sources. If any are present, they override all sources specified in
                 // the configuration file(s).
@@ -680,11 +680,11 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
 
             // Configure the HttpClient to be aware of the Dependabot Proxy, if used.
             HttpClientHandler httpClientHandler = new();
-            if (this.dependabotProxy != null)
+            if (dependabotProxy != null)
             {
-                httpClientHandler.Proxy = new WebProxy(this.dependabotProxy.Address);
+                httpClientHandler.Proxy = new WebProxy(dependabotProxy.Address);
 
-                if (this.dependabotProxy.Certificate != null)
+                if (dependabotProxy.Certificate != null)
                 {
                     httpClientHandler.ServerCertificateCustomValidationCallback = (message, cert, chain, _) =>
                     {
@@ -699,7 +699,7 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
                             return false;
                         }
                         chain.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
-                        chain.ChainPolicy.CustomTrustStore.Add(this.dependabotProxy.Certificate);
+                        chain.ChainPolicy.CustomTrustStore.Add(dependabotProxy.Certificate);
                         return chain.Build(cert);
                     };
                 }
@@ -788,10 +788,10 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
             var excludedFeeds = GetExcludedFeeds();
 
             var feedsToCheck = feeds.Where(feed => !excludedFeeds.Contains(feed)).ToHashSet();
-            var reachableFeeds = this.GetReachableNuGetFeeds(feedsToCheck, isFallback: false);
+            var reachableFeeds = GetReachableNuGetFeeds(feedsToCheck, isFallback: false);
             var allFeedsReachable = reachableFeeds.Count == feedsToCheck.Count;
 
-            this.EmitUnreachableFeedsDiagnostics(allFeedsReachable);
+            EmitUnreachableFeedsDiagnostics(allFeedsReachable);
 
             return (allFeedsReachable, reachableFeeds);
         }
@@ -863,11 +863,11 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
 
                 if (invalidNugetConfigs.Count() > 0)
                 {
-                    this.logger.LogWarning(string.Format(
+                    logger.LogWarning(string.Format(
                         "Found incorrectly named NuGet configuration files: {0}",
                         string.Join(", ", invalidNugetConfigs)
                     ));
-                    this.diagnosticsWriter.AddEntry(new DiagnosticMessage(
+                    diagnosticsWriter.AddEntry(new DiagnosticMessage(
                         Language.CSharp,
                         "buildless/case-sensitive-nuget-config",
                         "Found NuGet configuration files which are not correctly named",
@@ -933,7 +933,7 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
             else
             {
                 // If we haven't found any `nuget.config` files, then obtain a list of feeds from the root source directory.
-                allFeeds = GetFeeds(() => dotnet.GetNugetFeedsFromFolder(this.fileProvider.SourceDir.FullName)).ToHashSet();
+                allFeeds = GetFeeds(() => dotnet.GetNugetFeedsFromFolder(fileProvider.SourceDir.FullName)).ToHashSet();
             }
 
             logger.LogInfo($"Found {allFeeds.Count} NuGet feeds (with inherited ones) in nuget.config files: {string.Join(", ", allFeeds.OrderBy(f => f))}");
