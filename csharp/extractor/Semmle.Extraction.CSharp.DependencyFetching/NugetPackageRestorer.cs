@@ -27,6 +27,7 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
         private readonly IDiagnosticsWriter diagnosticsWriter;
         private readonly DependencyDirectory legacyPackageDirectory;
         private readonly DependencyDirectory missingPackageDirectory;
+        private readonly DependencyDirectory emptyPackageDirectory;
         private readonly ILogger logger;
         private readonly ICompilationInfoContainer compilationInfoContainer;
         private readonly Lazy<bool> lazyCheckNugetFeedResponsiveness = new(() => EnvironmentVariables.GetBooleanOptOut(EnvironmentVariableNames.CheckNugetFeedResponsiveness));
@@ -56,6 +57,7 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
             PackageDirectory = new DependencyDirectory("packages", "package", logger);
             legacyPackageDirectory = new DependencyDirectory("legacypackages", "legacy package", logger);
             missingPackageDirectory = new DependencyDirectory("missingpackages", "missing package", logger);
+            emptyPackageDirectory = new DependencyDirectory("empty", "empty package", logger);
         }
 
         public string? TryRestore(string package)
@@ -323,6 +325,12 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
 
         private string? MakeRestoreSourcesArgument(IEnumerable<string> feeds)
         {
+            // If there are no feeds, we want to override any default feeds that `dotnet restore` would use by passing a dummy source argument.
+            if (!feeds.Any())
+            {
+                return $" -s \"{emptyPackageDirectory.DirInfo.FullName}\"";
+            }
+
             // Add package sources. If any are present, they override all sources specified in
             // the configuration file(s).
             var feedArgs = new StringBuilder();
@@ -973,6 +981,7 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
             PackageDirectory?.Dispose();
             legacyPackageDirectory?.Dispose();
             missingPackageDirectory?.Dispose();
+            emptyPackageDirectory?.Dispose();
         }
 
         /// <summary>
