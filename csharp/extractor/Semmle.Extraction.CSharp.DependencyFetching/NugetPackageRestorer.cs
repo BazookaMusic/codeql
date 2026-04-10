@@ -164,7 +164,7 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
                     explicitNugetSources = MakeRestoreSourcesArgument(allFeeds);
                 }
 
-                using (var nuget = new NugetExeWrapper(fileProvider, legacyPackageDirectory, logger))
+                using (var nuget = new NugetExeWrapper(fileProvider, legacyPackageDirectory, logger, IsDefaultFeedReachable))
                 {
                     var count = nuget.InstallPackages();
 
@@ -256,6 +256,17 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
             }
 
             return reachableFeeds;
+        }
+
+        private bool IsDefaultFeedReachable()
+        {
+            if (CheckNugetFeedResponsiveness)
+            {
+                var (initialTimeout, tryCount) = GetFeedRequestSettings(isFallback: false);
+                return IsFeedReachable(PublicNugetOrgFeed, initialTimeout, tryCount, allowNonTimeoutExceptions: false);
+            }
+
+            return true;
         }
 
         private List<string> GetReachableFallbackNugetFeeds(HashSet<string>? feedsFromNugetConfigs)
