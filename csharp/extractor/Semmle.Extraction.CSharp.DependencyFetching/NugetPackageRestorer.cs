@@ -666,15 +666,9 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
             }
         }
 
-        private static async Task ExecuteGetRequest(string address, HttpClient httpClient, CancellationToken cancellationToken)
+        private static async Task<HttpResponseMessage> ExecuteGetRequest(string address, HttpClient httpClient, CancellationToken cancellationToken)
         {
-            using var stream = await httpClient.GetStreamAsync(address, cancellationToken);
-            var buffer = new byte[1024];
-            int bytesRead;
-            while ((bytesRead = stream.Read(buffer, 0, buffer.Length)) > 0)
-            {
-                // do nothing
-            }
+            return await httpClient.GetAsync(address, cancellationToken);
         }
 
         private bool IsFeedReachable(string feed, int timeoutMilliSeconds, int tryCount, bool allowNonTimeoutExceptions)
@@ -716,7 +710,9 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
                 cts.CancelAfter(timeoutMilliSeconds);
                 try
                 {
-                    ExecuteGetRequest(feed, client, cts.Token).GetAwaiter().GetResult();
+                    logger.LogInfo($"Attempt {i + 1}/{tryCount} to reach NuGet feed '{feed}'.");
+                    var response = ExecuteGetRequest(feed, client, cts.Token).GetAwaiter().GetResult();
+                    response.EnsureSuccessStatusCode();
                     logger.LogInfo($"Querying NuGet feed '{feed}' succeeded.");
                     return true;
                 }
@@ -731,9 +727,11 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
                         continue;
                     }
 
-                    // We're only interested in timeouts.
-                    var start = allowNonTimeoutExceptions ? "Considering" : "Not considering";
-                    logger.LogInfo($"Querying NuGet feed '{feed}' failed in a timely manner. {start} the feed for use. The reason for the failure: {exc.Message}");
+                    // Adjust the message based on whether non-timeout exceptions are allowed.
+                    var useMessage = allowNonTimeoutExceptions
+                        ? "Considering the feed for use despite of the failure as it wasn't a timeout."
+                        : "Not considering the feed for use.";
+                    logger.LogInfo($"Querying NuGet feed '{feed}' failed. {useMessage} The reason for the failure: {exc.Message}");
                     return allowNonTimeoutExceptions;
                 }
             }
