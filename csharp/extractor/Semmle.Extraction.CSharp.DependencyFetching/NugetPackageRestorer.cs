@@ -148,7 +148,8 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
                     // All explicit feeds can be considered reachable
                     HashSet<string> reachableFeeds = [];
                     reachableFeeds.UnionWith(explicitFeeds);
-                    reachableFeeds.UnionWith(GetReachableNuGetFeeds(inheritedFeeds, isFallback: false));
+                    // Inherited feeds should only be used, if they are indeed reachable (as they may be environment specific).
+                    reachableFeeds.UnionWith(GetReachableNuGetFeeds(inheritedFeeds, isFallback: false, allowNonTimeoutExceptions: false));
 
                     // If feed responsiveness is being checked, we only want to use the feeds that are reachable (note this set includes private
                     // registry feeds if they are reachable).
@@ -231,15 +232,16 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
         /// </summary>
         /// <param name="feedsToCheck">The feeds to check.</param>
         /// <param name="isFallback">Whether the feeds are fallback feeds or not.</param>
+        /// <param name="allowNonTimeoutExceptions">Whether to allow non-timeout exceptions.</param>
         /// <returns>The list of feeds that could be reached.</returns>
-        private List<string> GetReachableNuGetFeeds(HashSet<string> feedsToCheck, bool isFallback)
+        private List<string> GetReachableNuGetFeeds(HashSet<string> feedsToCheck, bool isFallback, bool allowNonTimeoutExceptions)
         {
             var fallbackStr = isFallback ? "fallback " : "";
             logger.LogInfo($"Checking {fallbackStr}NuGet feed reachability on feeds: {string.Join(", ", feedsToCheck.OrderBy(f => f))}");
 
             var (initialTimeout, tryCount) = GetFeedRequestSettings(isFallback);
             var reachableFeeds = feedsToCheck
-                .Where(feed => IsFeedReachable(feed, initialTimeout, tryCount, allowExceptions: false))
+                .Where(feed => IsFeedReachable(feed, initialTimeout, tryCount, allowNonTimeoutExceptions))
                 .ToList();
 
             if (reachableFeeds.Count == 0)
@@ -274,7 +276,7 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
                 }
             }
 
-            var reachableFallbackFeeds = GetReachableNuGetFeeds(fallbackFeeds, isFallback: true);
+            var reachableFallbackFeeds = GetReachableNuGetFeeds(fallbackFeeds, isFallback: true, allowNonTimeoutExceptions: false);
 
             compilationInfoContainer.CompilationInfos.Add(("Reachable fallback NuGet feed count", reachableFallbackFeeds.Count.ToString()));
 
@@ -675,7 +677,7 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
             }
         }
 
-        private bool IsFeedReachable(string feed, int timeoutMilliSeconds, int tryCount, bool allowExceptions = true)
+        private bool IsFeedReachable(string feed, int timeoutMilliSeconds, int tryCount, bool allowNonTimeoutExceptions)
         {
             logger.LogInfo($"Checking if NuGet feed '{feed}' is reachable...");
 
@@ -730,9 +732,9 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
                     }
 
                     // We're only interested in timeouts.
-                    var start = allowExceptions ? "Considering" : "Not considering";
+                    var start = allowNonTimeoutExceptions ? "Considering" : "Not considering";
                     logger.LogInfo($"Querying NuGet feed '{feed}' failed in a timely manner. {start} the feed for use. The reason for the failure: {exc.Message}");
-                    return allowExceptions;
+                    return allowNonTimeoutExceptions;
                 }
             }
 
@@ -798,7 +800,7 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
                 return true;
             }).ToHashSet();
 
-            var reachableFeeds = GetReachableNuGetFeeds(feedsToCheck, isFallback: false);
+            var reachableFeeds = GetReachableNuGetFeeds(feedsToCheck, isFallback: false, allowNonTimeoutExceptions: true);
             var allFeedsReachable = reachableFeeds.Count == feedsToCheck.Count;
 
             EmitUnreachableFeedsDiagnostics(allFeedsReachable);
