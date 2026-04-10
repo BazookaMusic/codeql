@@ -138,8 +138,9 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
                         compilationInfoContainer.CompilationInfos.Add(("Inherited NuGet feed count", inheritedFeeds.Count.ToString()));
                     }
 
-                    if (!CheckSpecifiedFeeds(explicitFeeds))
+                    if (!CheckSpecifiedFeeds(explicitFeeds, out var reachableFeeds))
                     {
+                        // If we experience a timeout, we use this fallback.
                         // todo: we could also check the reachability of the inherited nuget feeds, but to use those in the fallback we would need to handle authentication too.
                         var unresponsiveMissingPackageLocation = DownloadMissingPackagesFromSpecificFeeds([], explicitFeeds);
                         return unresponsiveMissingPackageLocation is null
@@ -147,11 +148,8 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
                             : [unresponsiveMissingPackageLocation];
                     }
 
-                    // All explicit feeds can be considered reachable
-                    HashSet<string> reachableFeeds = [];
-                    reachableFeeds.UnionWith(explicitFeeds);
                     // Inherited feeds should only be used, if they are indeed reachable (as they may be environment specific).
-                    reachableFeeds.UnionWith(GetReachableNuGetFeeds(inheritedFeeds, isFallback: false, allowNonTimeoutExceptions: false));
+                    reachableFeeds.UnionWith(GetReachableNuGetFeeds(inheritedFeeds, isFallback: false, out var _));
 
                     // If feed responsiveness is being checked, we only want to use the feeds that are reachable (note this set includes private
                     // registry feeds if they are reachable).
@@ -234,16 +232,22 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
         /// </summary>
         /// <param name="feedsToCheck">The feeds to check.</param>
         /// <param name="isFallback">Whether the feeds are fallback feeds or not.</param>
-        /// <param name="allowNonTimeoutExceptions">Whether to allow non-timeout exceptions.</param>
+        /// <param name="isTimeout">Whether a timeout occurred while checking the feeds.</param>
         /// <returns>The list of feeds that could be reached.</returns>
-        private List<string> GetReachableNuGetFeeds(HashSet<string> feedsToCheck, bool isFallback, bool allowNonTimeoutExceptions)
+        private List<string> GetReachableNuGetFeeds(HashSet<string> feedsToCheck, bool isFallback, out bool isTimeout)
         {
             var fallbackStr = isFallback ? "fallback " : "";
             logger.LogInfo($"Checking {fallbackStr}NuGet feed reachability on feeds: {string.Join(", ", feedsToCheck.OrderBy(f => f))}");
 
             var (initialTimeout, tryCount) = GetFeedRequestSettings(isFallback);
+            var timeout = false;
             var reachableFeeds = feedsToCheck
-                .Where(feed => IsFeedReachable(feed, initialTimeout, tryCount, allowNonTimeoutExceptions))
+                .Where(feed =>
+                {
+                    var reachable = IsFeedReachable(feed, initialTimeout, tryCount, out var feedTimeout);
+                    timeout |= feedTimeout;
+                    return reachable;
+                })
                 .ToList();
 
             if (reachableFeeds.Count == 0)
@@ -255,6 +259,7 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
                 logger.LogInfo($"Reachable {fallbackStr}NuGet feeds: {string.Join(", ", reachableFeeds.OrderBy(f => f))}");
             }
 
+            isTimeout = timeout;
             return reachableFeeds;
         }
 
@@ -263,7 +268,7 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
             if (CheckNugetFeedResponsiveness)
             {
                 var (initialTimeout, tryCount) = GetFeedRequestSettings(isFallback: false);
-                return IsFeedReachable(PublicNugetOrgFeed, initialTimeout, tryCount, allowNonTimeoutExceptions: false);
+                return IsFeedReachable(PublicNugetOrgFeed, initialTimeout, tryCount, out var _);
             }
 
             return true;
@@ -289,7 +294,7 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
                 }
             }
 
-            var reachableFallbackFeeds = GetReachableNuGetFeeds(fallbackFeeds, isFallback: true, allowNonTimeoutExceptions: false);
+            var reachableFallbackFeeds = GetReachableNuGetFeeds(fallbackFeeds, isFallback: true, out var _);
 
             compilationInfoContainer.CompilationInfos.Add(("Reachable fallback NuGet feed count", reachableFallbackFeeds.Count.ToString()));
 
@@ -690,7 +695,7 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
             return await httpClient.GetAsync(address, cancellationToken);
         }
 
-        private bool IsFeedReachable(string feed, int timeoutMilliSeconds, int tryCount, bool allowNonTimeoutExceptions)
+        private bool IsFeedReachable(string feed, int timeoutMilliSeconds, int tryCount, out bool isTimeout)
         {
             logger.LogInfo($"Checking if NuGet feed '{feed}' is reachable...");
 
@@ -723,6 +728,8 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
 
             using HttpClient client = new(httpClientHandler);
 
+            isTimeout = false;
+
             for (var i = 0; i < tryCount; i++)
             {
                 using var cts = new CancellationTokenSource();
@@ -746,16 +753,13 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
                         continue;
                     }
 
-                    // Adjust the message based on whether non-timeout exceptions are allowed.
-                    var useMessage = allowNonTimeoutExceptions
-                        ? "Considering the feed for use despite of the failure as it wasn't a timeout."
-                        : "Not considering the feed for use.";
-                    logger.LogInfo($"Querying NuGet feed '{feed}' failed. {useMessage} The reason for the failure: {exc.Message}");
-                    return allowNonTimeoutExceptions;
+                    logger.LogInfo($"Querying NuGet feed '{feed}' failed. The reason for the failure: {exc.Message}");
+                    return false;
                 }
             }
 
             logger.LogWarning($"Didn't receive answer from NuGet feed '{feed}'. Tried it {tryCount} times.");
+            isTimeout = true;
             return false;
         }
 
@@ -798,10 +802,12 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
         /// Checks that we can connect to the specified NuGet feeds.
         /// </summary>
         /// <param name="feeds">The set of package feeds to check.</param>
+        /// <param name="reachableFeeds">The list of feeds that were reachable.</param>
         /// <returns>
-        /// True if all feeds are reachable (excluding any feeds that are configured to be excluded from the check) or false otherwise.
+        /// True if there is no timeout when trying to reach the feeds (excluding any feeds that are configured
+        /// to be excluded from the check) or false otherwise.
         /// </returns>
-        private bool CheckSpecifiedFeeds(HashSet<string> feeds)
+        private bool CheckSpecifiedFeeds(HashSet<string> feeds, out HashSet<string> reachableFeeds)
         {
             // Exclude any feeds from the feed check that are configured by the corresponding environment variable.
             // These feeds are always assumed to be reachable.
@@ -817,12 +823,11 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
                 return true;
             }).ToHashSet();
 
-            var reachableFeeds = GetReachableNuGetFeeds(feedsToCheck, isFallback: false, allowNonTimeoutExceptions: true);
-            var allFeedsReachable = reachableFeeds.Count == feedsToCheck.Count;
+            reachableFeeds = GetReachableNuGetFeeds(feedsToCheck, isFallback: false, out var isTimeout).ToHashSet();
 
-            EmitUnreachableFeedsDiagnostics(allFeedsReachable);
-
-            return allFeedsReachable;
+            var noTimeout = !isTimeout;
+            EmitUnreachableFeedsDiagnostics(noTimeout);
+            return noTimeout;
         }
 
         /// <summary>
