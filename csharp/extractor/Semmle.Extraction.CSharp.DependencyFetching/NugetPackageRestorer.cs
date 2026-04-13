@@ -825,9 +825,9 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
 
             reachableFeeds = GetReachableNuGetFeeds(feedsToCheck, isFallback: false, out var isTimeout).ToHashSet();
 
-            var noTimeout = !isTimeout;
-            EmitUnreachableFeedsDiagnostics(noTimeout);
-            return noTimeout;
+            var allReachable = reachableFeeds.Count == feedsToCheck.Count;
+            EmitUnreachableFeedsDiagnostics(allReachable);
+            return !isTimeout;
         }
 
         /// <summary>
