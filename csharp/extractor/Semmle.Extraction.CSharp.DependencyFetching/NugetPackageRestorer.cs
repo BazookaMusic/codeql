@@ -352,7 +352,7 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
             var feedArgs = new StringBuilder();
             foreach (var feed in feeds)
             {
-                feedArgs.Append($" -s {feed}");
+                feedArgs.Append($" -s \"{feed}\"");
             }
 
             return feedArgs.ToString();
@@ -692,7 +692,7 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
 
         private static async Task<HttpResponseMessage> ExecuteGetRequest(string address, HttpClient httpClient, CancellationToken cancellationToken)
         {
-            return await httpClient.GetAsync(address, cancellationToken);
+            return await httpClient.GetAsync(address, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         }
 
         private bool IsFeedReachable(string feed, int timeoutMilliSeconds, int tryCount, out bool isTimeout)
@@ -737,7 +737,7 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
                 try
                 {
                     logger.LogInfo($"Attempt {i + 1}/{tryCount} to reach NuGet feed '{feed}'.");
-                    var response = ExecuteGetRequest(feed, client, cts.Token).GetAwaiter().GetResult();
+                    using var response = ExecuteGetRequest(feed, client, cts.Token).GetAwaiter().GetResult();
                     response.EnsureSuccessStatusCode();
                     logger.LogInfo($"Querying NuGet feed '{feed}' succeeded.");
                     return true;
@@ -824,9 +824,12 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
             }).ToHashSet();
 
             reachableFeeds = GetReachableNuGetFeeds(feedsToCheck, isFallback: false, out var isTimeout).ToHashSet();
-
             var allReachable = reachableFeeds.Count == feedsToCheck.Count;
             EmitUnreachableFeedsDiagnostics(allReachable);
+
+            // Always consider feeds excluded for the reachability check as reachable.
+            reachableFeeds.UnionWith(feeds.Where(feed => excludedFeeds.Contains(feed)));
+
             return !isTimeout;
         }
 
