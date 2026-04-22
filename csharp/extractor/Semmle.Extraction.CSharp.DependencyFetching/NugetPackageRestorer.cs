@@ -137,7 +137,11 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
                         compilationInfoContainer.CompilationInfos.Add(("Inherited NuGet feed count", inheritedFeeds.Count.ToString()));
                     }
 
-                    if (!CheckSpecifiedFeeds(explicitFeeds, out var reachableFeeds))
+                    var timeout = CheckSpecifiedFeeds(explicitFeeds, out var reachableFeeds);
+                    var allReachable = explicitFeeds.Count == reachableFeeds.Count;
+                    EmitUnreachableFeedsDiagnostics(allReachable);
+
+                    if (timeout)
                     {
                         // If we experience a timeout, we use this fallback.
                         // todo: we could also check the reachability of the inherited nuget feeds, but to use those in the fallback we would need to handle authentication too.
@@ -148,7 +152,8 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
                     }
 
                     // Inherited feeds should only be used, if they are indeed reachable (as they may be environment specific).
-                    reachableFeeds.UnionWith(GetReachableNuGetFeeds(inheritedFeeds, isFallback: false, out var _));
+                    CheckSpecifiedFeeds(inheritedFeeds, out var reachableInheritedFeeds);
+                    reachableFeeds.UnionWith(reachableInheritedFeeds);
 
                     // If feed responsiveness is being checked, we only want to use the feeds that are reachable (note this set includes private
                     // registry feeds if they are reachable).
@@ -803,7 +808,7 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
         /// <param name="feeds">The set of package feeds to check.</param>
         /// <param name="reachableFeeds">The list of feeds that were reachable.</param>
         /// <returns>
-        /// True if there is no timeout when trying to reach the feeds (excluding any feeds that are configured
+        /// True if there is a timeout when trying to reach the feeds (excluding any feeds that are configured
         /// to be excluded from the check) or false otherwise.
         /// </returns>
         private bool CheckSpecifiedFeeds(HashSet<string> feeds, out HashSet<string> reachableFeeds)
@@ -823,13 +828,11 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
             }).ToHashSet();
 
             reachableFeeds = GetReachableNuGetFeeds(feedsToCheck, isFallback: false, out var isTimeout).ToHashSet();
-            var allReachable = reachableFeeds.Count == feedsToCheck.Count;
-            EmitUnreachableFeedsDiagnostics(allReachable);
 
             // Always consider feeds excluded for the reachability check as reachable.
             reachableFeeds.UnionWith(feeds.Where(feed => excludedFeeds.Contains(feed)));
 
-            return !isTimeout;
+            return isTimeout;
         }
 
         /// <summary>
