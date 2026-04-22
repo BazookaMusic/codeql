@@ -33,6 +33,9 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
         private readonly Lazy<bool> hasNugetNoStablePackageVersionError = new(() => Output.Any(s => s.Contains("NU1103")));
         public bool HasNugetNoStablePackageVersionError => hasNugetNoStablePackageVersionError.Value;
 
+        private readonly Lazy<bool> hasNugetPackageMissingError = new(() => Output.Any(s => s.Contains("NU1101")));
+        public bool HasNugetPackageMissingError => hasNugetPackageMissingError.Value;
+
         private static IEnumerable<string> GetFirstGroupOnMatch(Regex regex, IEnumerable<string> lines) =>
             lines
                 .Select(line => regex.Match(line))

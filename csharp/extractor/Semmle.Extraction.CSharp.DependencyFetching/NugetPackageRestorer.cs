@@ -317,6 +317,8 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
         {
             var successCount = 0;
             var nugetSourceFailures = 0;
+            var nugetMissingPackageFailures = 0;
+
             var assets = new Assets(logger);
 
             var isWindows = fileContent.UseWindowsForms || fileContent.UseWpf;
@@ -333,12 +335,17 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
                     {
                         nugetSourceFailures++;
                     }
+                    if (res.HasNugetPackageMissingError)
+                    {
+                        nugetMissingPackageFailures++;
+                    }
                     assets.AddDependenciesRange(res.AssetsFilePaths);
                     return res.RestoredProjects;
                 }).ToList();
             dependencies = assets.Dependencies;
             compilationInfoContainer.CompilationInfos.Add(("Successfully restored solution files", successCount.ToString()));
             compilationInfoContainer.CompilationInfos.Add(("Failed solution restore with package source error", nugetSourceFailures.ToString()));
+            compilationInfoContainer.CompilationInfos.Add(("Failed solution restore with missing package error", nugetMissingPackageFailures.ToString()));
             compilationInfoContainer.CompilationInfos.Add(("Restored projects through solution files", projects.Count.ToString()));
             return projects;
         }
@@ -373,6 +380,7 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
         {
             var successCount = 0;
             var nugetSourceFailures = 0;
+            var nugetMissingPackageFailures = 0;
             ConcurrentBag<DependencyContainer> collectedDependencies = [];
 
             var isWindows = fileContent.UseWindowsForms || fileContent.UseWpf;
@@ -397,6 +405,10 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
                         {
                             nugetSourceFailures++;
                         }
+                        if (res.HasNugetPackageMissingError)
+                        {
+                            nugetMissingPackageFailures++;
+                        }
                     }
                 }
                 collectedDependencies.Add(assets.Dependencies);
@@ -404,6 +416,7 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
             dependencies = collectedDependencies;
             compilationInfoContainer.CompilationInfos.Add(("Successfully restored project files", successCount.ToString()));
             compilationInfoContainer.CompilationInfos.Add(("Failed project restore with package source error", nugetSourceFailures.ToString()));
+            compilationInfoContainer.CompilationInfos.Add(("Failed project restore with missing package error", nugetMissingPackageFailures.ToString()));
         }
 
         private AssemblyLookupLocation? DownloadMissingPackagesFromSpecificFeeds(IEnumerable<string> usedPackageNames, HashSet<string>? feedsFromNugetConfigs)
