@@ -30,8 +30,7 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
         private readonly DependencyDirectory emptyPackageDirectory;
         private readonly ILogger logger;
         private readonly ICompilationInfoContainer compilationInfoContainer;
-        private readonly Lazy<bool> lazyCheckNugetFeedResponsiveness = new(() => EnvironmentVariables.GetBooleanOptOut(EnvironmentVariableNames.CheckNugetFeedResponsiveness));
-        private bool CheckNugetFeedResponsiveness => lazyCheckNugetFeedResponsiveness.Value;
+        private bool CheckNugetFeedResponsiveness { get; } = EnvironmentVariables.GetBooleanOptOut(EnvironmentVariableNames.CheckNugetFeedResponsiveness);
         private HashSet<string> PrivateRegistryFeeds => dependabotProxy?.RegistryURLs ?? [];
         private bool HasPrivateRegistryFeeds => PrivateRegistryFeeds.Any();
 
