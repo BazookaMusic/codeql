@@ -1003,9 +1003,13 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
             // Add all explicitFeeds to the set of all feeds.
             allFeeds.UnionWith(explicitFeeds);
 
+            // Obtain the list of feeds from the root source directory.
+            // If a NuGet file is present it will be respected, otherwise we will just get the machine/environment specific feeds.
+            var nugetFeedsFromRoot = GetFeeds(() => dotnet.GetNugetFeedsFromFolder(fileProvider.SourceDir.FullName));
+            allFeeds.UnionWith(nugetFeedsFromRoot);
+
             if (nugetConfigs.Count > 0)
             {
-                // We don't have to get the feeds from each of the folders from below, it would be enought to check the folders that recursively contain the others.
                 var nugetConfigFeeds = nugetConfigs
                     .Select(GetDirectoryName)
                     .Where(folder => folder != null)
@@ -1013,12 +1017,6 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
                     .ToHashSet();
 
                 allFeeds.UnionWith(nugetConfigFeeds);
-            }
-            else
-            {
-                // If we haven't found any `nuget.config` files, then obtain a list of feeds from the root source directory.
-                var nugetFeedsFromRoot = GetFeeds(() => dotnet.GetNugetFeedsFromFolder(fileProvider.SourceDir.FullName));
-                allFeeds.UnionWith(nugetFeedsFromRoot);
             }
 
             logger.LogInfo($"Found {allFeeds.Count} NuGet feeds (with inherited ones) in nuget.config files: {string.Join(", ", allFeeds.OrderBy(f => f))}");
