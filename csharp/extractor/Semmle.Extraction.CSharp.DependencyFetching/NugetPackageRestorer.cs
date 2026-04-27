@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -30,9 +31,9 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
         private readonly DependencyDirectory emptyPackageDirectory;
         private readonly ILogger logger;
         private readonly ICompilationInfoContainer compilationInfoContainer;
-        private bool CheckNugetFeedResponsiveness { get; } = EnvironmentVariables.GetBooleanOptOut(EnvironmentVariableNames.CheckNugetFeedResponsiveness);
-        private HashSet<string> PrivateRegistryFeeds => dependabotProxy?.RegistryURLs ?? [];
-        private bool HasPrivateRegistryFeeds => PrivateRegistryFeeds.Any();
+        private readonly bool checkNugetFeedResponsiveness = EnvironmentVariables.GetBooleanOptOut(EnvironmentVariableNames.CheckNugetFeedResponsiveness);
+        private readonly ImmutableHashSet<string> privateRegistryFeeds;
+        private readonly bool hasPrivateRegistryFeeds;
 
         public DependencyDirectory PackageDirectory { get; }
 
@@ -49,6 +50,8 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
             this.fileContent = fileContent;
             this.dotnet = dotnet;
             this.dependabotProxy = dependabotProxy;
+            this.privateRegistryFeeds = dependabotProxy?.RegistryURLs.ToImmutableHashSet() ?? [];
+            this.hasPrivateRegistryFeeds = privateRegistryFeeds.Count > 0;
             this.diagnosticsWriter = diagnosticsWriter;
             this.logger = logger;
             this.compilationInfoContainer = compilationInfoContainer;
@@ -115,8 +118,8 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
         public HashSet<AssemblyLookupLocation> Restore()
         {
             var assemblyLookupLocations = new HashSet<AssemblyLookupLocation>();
-            logger.LogInfo($"Checking NuGet feed responsiveness: {CheckNugetFeedResponsiveness}");
-            compilationInfoContainer.CompilationInfos.Add(("NuGet feed responsiveness checked", CheckNugetFeedResponsiveness ? "1" : "0"));
+            logger.LogInfo($"Checking NuGet feed responsiveness: {checkNugetFeedResponsiveness}");
+            compilationInfoContainer.CompilationInfos.Add(("NuGet feed responsiveness checked", checkNugetFeedResponsiveness ? "1" : "0"));
 
             HashSet<string> explicitFeeds = [];
             HashSet<string> reachableFeeds = [];
@@ -128,7 +131,7 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
                 // (including inherited ones) from other locations on the host outside of the working directory.
                 (explicitFeeds, var allFeeds) = GetAllFeeds();
 
-                if (CheckNugetFeedResponsiveness)
+                if (checkNugetFeedResponsiveness)
                 {
                     var inheritedFeeds = allFeeds.Except(explicitFeeds).ToHashSet();
 
@@ -212,7 +215,7 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
 
             var usedPackageNames = GetAllUsedPackageDirNames(dependencies);
 
-            var missingPackageLocation = CheckNugetFeedResponsiveness
+            var missingPackageLocation = checkNugetFeedResponsiveness
                 ? DownloadMissingPackagesFromSpecificFeeds(usedPackageNames, explicitFeeds)
                 : DownloadMissingPackages(usedPackageNames);
 
@@ -261,7 +264,7 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
 
         private bool IsDefaultFeedReachable()
         {
-            if (CheckNugetFeedResponsiveness)
+            if (checkNugetFeedResponsiveness)
             {
                 var (initialTimeout, tryCount) = GetFeedRequestSettings(isFallback: false);
                 return IsFeedReachable(PublicNugetOrgFeed, initialTimeout, tryCount, out var _);
@@ -373,7 +376,7 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
         private string? MakeRestoreSourcesArgument(string path, HashSet<string> reachableFeeds)
         {
             // Do not construct an set of explicit NuGet sources to use for restore.
-            if (!CheckNugetFeedResponsiveness && !HasPrivateRegistryFeeds)
+            if (!checkNugetFeedResponsiveness && !hasPrivateRegistryFeeds)
             {
                 return null;
             }
@@ -382,12 +385,12 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
             var folder = GetDirectoryName(path);
             var feedsToConsider = folder is not null ? GetFeeds(() => dotnet.GetNugetFeedsFromFolder(folder)).ToHashSet() : [];
 
-            if (HasPrivateRegistryFeeds)
+            if (hasPrivateRegistryFeeds)
             {
-                feedsToConsider.UnionWith(PrivateRegistryFeeds);
+                feedsToConsider.UnionWith(privateRegistryFeeds);
             }
 
-            var feedsToUse = CheckNugetFeedResponsiveness
+            var feedsToUse = checkNugetFeedResponsiveness
                 ? feedsToConsider.Where(reachableFeeds.Contains)
                 : feedsToConsider;
 
@@ -992,10 +995,10 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
 
             // If private package registries are configured for C#, then consider those
             // in addition to the ones that are configured in `nuget.config` files.
-            if (HasPrivateRegistryFeeds)
+            if (hasPrivateRegistryFeeds)
             {
-                logger.LogInfo($"Found {PrivateRegistryFeeds.Count} private registry feeds configured for C#: {string.Join(", ", PrivateRegistryFeeds.OrderBy(f => f))}");
-                explicitFeeds.UnionWith(PrivateRegistryFeeds);
+                logger.LogInfo($"Found {privateRegistryFeeds.Count} private registry feeds configured for C#: {string.Join(", ", privateRegistryFeeds.OrderBy(f => f))}");
+                explicitFeeds.UnionWith(privateRegistryFeeds);
             }
 
             HashSet<string> allFeeds = [];
