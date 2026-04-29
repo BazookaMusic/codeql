@@ -28,7 +28,7 @@ class Test {
         logger.info("hash: " + hashPassword(password)); // Safe - hashed
         logger.info("hash: " + sha256Digest(authToken)); // Safe - digested
         logger.info("enc: " + encryptValue(password)); // Safe - encrypted
-        logger.info("pw: " + password); // $ Alert - not hashed
+        logger.info("pw: " + password); // $ Alert // not hashed
     }
 
     static String hashPassword(String input) { return input; }
