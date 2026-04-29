@@ -367,8 +367,8 @@ namespace Semmle.Extraction.CSharp.DependencyFetching
 
         /// <summary>
         /// Constructs the list of NuGet sources to use for this restore.
-        // (1) Use the feeds we get from `dotnet nuget list source`
-        // (2) Use private registries, if they are configured
+        /// (1) Use the feeds we get from `dotnet nuget list source`
+        /// (2) Use private registries, if they are configured
         /// </summary>
         /// <param name="path">Path to project/solution</param>
         /// <param name="reachableFeeds">The set of reachable NuGet feeds.</param>
