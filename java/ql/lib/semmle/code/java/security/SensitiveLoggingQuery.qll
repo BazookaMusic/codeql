@@ -125,12 +125,7 @@ private class DefaultSensitiveLoggerBarrier extends SensitiveLoggerBarrier {
  * This is consistent with the treatment of encryption in `CleartextStorageQuery.qll` (CWE-312).
  */
 private class EncryptionBarrier extends SensitiveLoggerBarrier {
-  EncryptionBarrier() {
-    exists(MethodCall mc |
-      this.asExpr() = mc and
-      mc.getMethod().getName().toLowerCase().matches(["%encrypt%", "%hash%", "%digest%"])
-    )
-  }
+  EncryptionBarrier() { this.asExpr() instanceof EncryptedSensitiveMethodCall }
 }
 
 /** A data-flow configuration for identifying potentially-sensitive data flowing to a log output. */
