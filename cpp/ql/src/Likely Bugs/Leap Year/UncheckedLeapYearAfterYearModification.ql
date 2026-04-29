@@ -311,7 +311,7 @@ predicate isOperationSourceCandidate(Expr e) {
 }
 
 /**
- * The set of all expressions which is a candidate expression.
+ * The set of all expressions that are candidate expression.
  * ```
  * a = something <<< 2;
  * myDate.year = a + 1;        // invalid
