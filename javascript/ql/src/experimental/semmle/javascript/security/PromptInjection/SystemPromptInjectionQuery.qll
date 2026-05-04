@@ -9,9 +9,9 @@
 private import javascript
 import semmle.javascript.dataflow.DataFlow
 import semmle.javascript.dataflow.TaintTracking
-import PromptInjectionCustomizations::PromptInjection
+import SystemPromptInjectionCustomizations::SystemPromptInjection
 
-private module PromptInjectionConfig implements DataFlow::ConfigSig {
+private module SystemPromptInjectionConfig implements DataFlow::ConfigSig {
   predicate isSource(DataFlow::Node node) { node instanceof Source }
 
   predicate isSink(DataFlow::Node node) { node instanceof Sink }
@@ -22,4 +22,4 @@ private module PromptInjectionConfig implements DataFlow::ConfigSig {
 }
 
 /** Global taint-tracking for detecting "prompt injection" vulnerabilities. */
-module PromptInjectionFlow = TaintTracking::Global<PromptInjectionConfig>;
+module SystemPromptInjectionFlow = TaintTracking::Global<SystemPromptInjectionConfig>;

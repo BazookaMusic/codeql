@@ -11,10 +11,10 @@
  */
 
 import javascript
-import experimental.semmle.javascript.security.PromptInjection.PromptInjectionQuery
-import PromptInjectionFlow::PathGraph
+import experimental.semmle.javascript.security.PromptInjection.SystemPromptInjectionQuery
+import SystemPromptInjectionFlow::PathGraph
 
-from PromptInjectionFlow::PathNode source, PromptInjectionFlow::PathNode sink
-where PromptInjectionFlow::flowPath(source, sink)
+from SystemPromptInjectionFlow::PathNode source, SystemPromptInjectionFlow::PathNode sink
+where SystemPromptInjectionFlow::flowPath(source, sink)
 select sink.getNode(), source, sink, "This prompt construction depends on a $@.", source.getNode(),
   "user-provided value"

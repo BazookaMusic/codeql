@@ -20,7 +20,7 @@ private import experimental.semmle.javascript.frameworks.GoogleGenAI
  * "prompt injection"
  * vulnerabilities, as well as extension points for adding your own.
  */
-module PromptInjection {
+module SystemPromptInjection {
   /**
    * A data flow source for "prompt injection" vulnerabilities.
    */
@@ -39,7 +39,14 @@ module PromptInjection {
   /**
    * An active threat-model source, considered as a flow source.
    */
-  private class ActiveThreatModelSourceAsSource extends Source, ActiveThreatModelSource { }
+  private class ActiveThreatModelSourceAsSource extends Source, ActiveThreatModelSource { 
+    ActiveThreatModelSourceAsSource()
+    {
+          this instanceof RemoteFlowSource
+          or
+          this.isClientSideSource()
+    }
+  }
 
   /**
    * A prompt to an AI model, considered as a flow sink.
@@ -54,13 +61,13 @@ module PromptInjection {
 
   private class PromptContentSink extends Sink {
     PromptContentSink() {
-      this = OpenAI::getContentNode().asSink()
+      this = OpenAI::getSystemOrAssistantPromptNode().asSink()
       or
-      this = AgentSDK::getContentNode().asSink()
+      this = AgentSDK::getSystemOrAssistantPromptNode().asSink()
       or
-      this = Anthropic::getContentNode().asSink()
+      this = Anthropic::getSystemOrAssistantPromptNode().asSink()
       or
-      this = GoogleGenAI::getContentNode().asSink()
+      this = GoogleGenAI::getSystemOrAssistantPromptNode().asSink()
     }
   }
 

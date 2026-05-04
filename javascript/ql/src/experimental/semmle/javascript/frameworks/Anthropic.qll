@@ -12,9 +12,8 @@ module Anthropic {
     result = API::moduleImport("@anthropic-ai/sdk").getInstance()
   }
 
-
   /** Gets a reference to a sink for the system prompt in the Anthropic messages API. */
-  API::Node getContentNode() {
+  API::Node getSystemOrAssistantPromptNode() {
     exists(API::Node createParams |
       // client.messages.create({ ... })
       createParams = classRef()
@@ -60,5 +59,31 @@ module Anthropic {
         .getMember("update")
         .getParameter(1)
         .getMember("system")
+  }
+
+  /** Gets a reference to nodes where potential user input can land. */
+  API::Node getUserPromptNode() {
+    exists(API::Node createParams |
+      // client.messages.create({ ... })
+      createParams = classRef()
+          .getMember("messages")
+          .getMember("create")
+          .getParameter(0)
+      or
+      // client.beta.messages.create({ ... })
+      createParams = classRef()
+          .getMember("beta")
+          .getMember("messages")
+          .getMember("create")
+          .getParameter(0)
+    |
+      // messages: [{ role: "user", content: "..." }]
+      exists(API::Node msg |
+        msg = createParams.getMember("messages").getArrayElement() and
+        not msg.getMember("role").asSink().mayHaveStringValue("assistant")
+      |
+        result = msg.getMember("content")
+      )
+    )
   }
 }
